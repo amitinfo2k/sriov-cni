@@ -32,6 +32,7 @@ const (
 type dpdkConf struct {
 	PCIaddr    string `json:"pci_addr"`
 	Ifname     string `json:"ifname"`
+	MAC     string `json:"mac"`
 	KDriver    string `json:"kernel_driver"`
 	DPDKDriver string `json:"dpdk_driver"`
 	DPDKtool   string `json:"dpdk_tool"`
@@ -41,6 +42,7 @@ type dpdkConf struct {
 type VfInformation struct {
 	PCIaddr string `json:"pci_addr"`
 	Pfname  string `json:"pfname"`
+	MAC     string `json:"mac"`
 	Vfid    int    `json:"vfid"`
 }
 
@@ -138,10 +140,15 @@ func getVfInfo(vfPci string) (*VfInformation, error) {
 	if err != nil {
 		return nil, err
 	}
+	mac, err := getIfMAC(vfPci, pf)
+	if err != nil {
+		return nil, err
+	}
 
 	return &VfInformation{
 		PCIaddr: vfPci,
 		Pfname:  pf,
+                MAC: mac,
 		Vfid:    vfID,
 	}, nil
 }
@@ -439,6 +446,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 	var vfIdx int
 	var infos []os.FileInfo
 	var pciAddr string
+        var macAddr string
 
 	// try to get VF using PF information
 	m, err := netlink.LinkByName(ifName)
@@ -489,6 +497,11 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 			if err != nil {
 				return fmt.Errorf("err in getting pci address - %q", err)
 			}
+			macAddr, err = getIfMAC(pciAddr, ifName)
+                        if err != nil {
+                                return fmt.Errorf("err in getting mac address - %q", err)
+                        }
+
 			break
 		} else {
 			return fmt.Errorf("mutiple network devices in directory %s", vfDir)
@@ -520,6 +533,7 @@ func setupVF(conf *NetConf, ifName string, podifName string, cid string, netns n
 		conf.DPDKConf.PCIaddr = pciAddr
 		conf.DPDKConf.Ifname = podifName
 		conf.DPDKConf.VFID = vfIdx
+                conf.DPDKConf.MAC = macAddr
 		if err = savedpdkConf(cid, conf.CNIDir, conf); err != nil {
 			return err
 		}
@@ -760,6 +774,21 @@ func getPfName(vf string) (string, error) {
 	return strings.TrimSpace(files[0].Name()), nil
 }
 
+func getIfMAC(pci string,ifname string) (string, error) {
+	sysBusPci := "/sys/bus/pci/devices"
+	addressFile := filepath.Join(sysBusPci,pci,"net",ifname,"address")
+	_, err := os.Lstat(addressFile)
+	if err != nil {
+		return "", err
+	}
+
+	mac, err := ioutil.ReadFile(addressFile)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(mac)), nil
+}
 func getVfid(addr string, pfName string) (int, error) {
 	var id int
 	vfTotal, err := getsriovNumfs(pfName)
