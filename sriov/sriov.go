@@ -395,6 +395,7 @@ func setupWithVfInfo(conf *NetConf, netns ns.NetNS, cid, podifName string) error
 	vfPciAddr := conf.DeviceInfo.PCIaddr
 	pfName := conf.DeviceInfo.Pfname
 	vfId := int(conf.DeviceInfo.Vfid)
+	mac := conf.DeviceInfo.MAC
 
 	// Get PF link with given name
 	m, err := netlink.LinkByName(pfName)
@@ -420,6 +421,7 @@ func setupWithVfInfo(conf *NetConf, netns ns.NetNS, cid, podifName string) error
 		conf.DPDKConf.PCIaddr = vfPciAddr
 		conf.DPDKConf.Ifname = podifName
 		conf.DPDKConf.VFID = vfId
+		conf.DPDKConf.MAC = mac
 		if err = savedpdkConf(cid, conf.CNIDir, conf); err != nil {
 			return err
 		}
@@ -776,11 +778,26 @@ func getPfName(vf string) (string, error) {
 
 func getIfMAC(pci string,ifname string) (string, error) {
 	sysBusPci := "/sys/bus/pci/devices"
-	addressFile := filepath.Join(sysBusPci,pci,"net",ifname,"address")
-	_, err := os.Lstat(addressFile)
+	//addressFile := filepath.Join(sysBusPci,pci,"net",ifname,"address")
+	netDir := filepath.Join(sysBusPci,pci,"net")
+	_, err := os.Lstat(netDir)
 	if err != nil {
 		return "", err
 	}
+        files, err := ioutil.ReadDir(netDir)
+        if err != nil {
+                return "", err
+        }
+
+        if len(files) < 1 {
+                return "", fmt.Errorf("VF network device not found")
+        }
+        addressFile := filepath.Join(sysBusPci,pci,"net",files[0].Name(),"address")
+
+        _, err1 := os.Lstat(addressFile)
+        if err1 != nil {
+                return "", err1
+        }
 
 	mac, err := ioutil.ReadFile(addressFile)
 	if err != nil {
